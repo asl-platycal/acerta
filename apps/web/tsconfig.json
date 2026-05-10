@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "@acerta/core": ["../../core/index.ts"],
+      "@acerta/core/*": ["../../core/*"],
+      "@acerta/shared": ["../../shared/index.ts"],
+      "@acerta/shared/*": ["../../shared/*"],
+      "@acerta/services": ["../../services/index.ts"],
+      "@acerta/services/*": ["../../services/*"],
+      "@acerta/backend/*": ["../../backend/*"],
+      "@acerta/tests/*": ["../../tests/*"]
+    }
+  },
+  "include": ["src"]
+}

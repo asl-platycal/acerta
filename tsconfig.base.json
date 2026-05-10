@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "baseUrl": ".",
+    "paths": {
+      "@acerta/core": ["core/index.ts"],
+      "@acerta/core/*": ["core/*"],
+      "@acerta/shared": ["shared/index.ts"],
+      "@acerta/shared/*": ["shared/*"],
+      "@acerta/services": ["services/index.ts"],
+      "@acerta/services/*": ["services/*"],
+      "@acerta/backend/*": ["backend/*"],
+      "@acerta/tests/*": ["tests/*"]
+    }
+  },
+  "exclude": ["node_modules"]
+}
