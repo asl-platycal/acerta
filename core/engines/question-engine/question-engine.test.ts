@@ -4,7 +4,7 @@ import {
   calculateResponseTimeMs,
   validateQuestionAnswer,
 } from "./question-engine";
-import type { Question } from "./types";
+import type { Question } from "@acerta/shared/schemas";
 import { validateQuestionAttemptInput, validateQuestionForProcessing } from "./validators";
 
 /** Espelha a entrada `DB_MASTER[0]` do protótipo (índice correto `c: 2` → Marte). */

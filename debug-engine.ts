@@ -3,7 +3,7 @@
  * Remover após o debug.
  */
 import { validateQuestionAnswer } from "./core/engines/question-engine/question-engine";
-import type { Question } from "./core/engines/question-engine/types";
+import type { Question } from "./shared/schemas";
 
 const fakeQuestion: Question = {
   id: "debug-fake-1",

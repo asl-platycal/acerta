@@ -8,8 +8,10 @@ import type {
 } from "@acerta/shared/schemas";
 
 const HEX_ID = /^hex:-?\d+:-?\d+$/;
-const FLEET_ID = /^fleet_unit:.+$/;
-const STRUCTURE_ID = /^structure:.+$/;
+const FLEET_ENTITY_ID = /^fleet_unit:.+$/;
+const STRUCTURE_ENTITY_ID = /^structure:.+$/;
+const FLEET_PLACEMENT_ID = /^fleet_placement:.+$/;
+const STRUCTURE_PLACEMENT_ID = /^structure_placement:.+$/;
 
 export function validateHexCoordinateId(id: string | undefined): StructuralValidationResult {
   if (typeof id !== "string" || id.length === 0) {
@@ -21,11 +23,31 @@ export function validateHexCoordinateId(id: string | undefined): StructuralValid
   return { ok: true };
 }
 
+export function validateFleetEntityId(id: string | undefined): StructuralValidationResult {
+  if (typeof id !== "string" || id.length === 0) {
+    return { ok: false, reason: "fleet_entity_id_empty" };
+  }
+  if (!FLEET_ENTITY_ID.test(id)) {
+    return { ok: false, reason: "fleet_entity_id_format_invalid" };
+  }
+  return { ok: true };
+}
+
+export function validateStructureEntityId(id: string | undefined): StructuralValidationResult {
+  if (typeof id !== "string" || id.length === 0) {
+    return { ok: false, reason: "structure_entity_id_empty" };
+  }
+  if (!STRUCTURE_ENTITY_ID.test(id)) {
+    return { ok: false, reason: "structure_entity_id_format_invalid" };
+  }
+  return { ok: true };
+}
+
 export function validateFleetPlacementId(id: string | undefined): StructuralValidationResult {
   if (typeof id !== "string" || id.length === 0) {
     return { ok: false, reason: "fleet_placement_id_empty" };
   }
-  if (!FLEET_ID.test(id)) {
+  if (!FLEET_PLACEMENT_ID.test(id)) {
     return { ok: false, reason: "fleet_placement_id_format_invalid" };
   }
   return { ok: true };
@@ -35,7 +57,7 @@ export function validateStructurePlacementId(id: string | undefined): Structural
   if (typeof id !== "string" || id.length === 0) {
     return { ok: false, reason: "structure_placement_id_empty" };
   }
-  if (!STRUCTURE_ID.test(id)) {
+  if (!STRUCTURE_PLACEMENT_ID.test(id)) {
     return { ok: false, reason: "structure_placement_id_format_invalid" };
   }
   return { ok: true };
@@ -78,6 +100,9 @@ export function validateBoardSnapshot(board: Board | null | undefined): Structur
   if (!board.generation || typeof board.generation !== "object") {
     return { ok: false, reason: "board_generation_meta_invalid" };
   }
+  if (board.revealedTerrainHexIds !== undefined && !Array.isArray(board.revealedTerrainHexIds)) {
+    return { ok: false, reason: "board_terrain_reveals_invalid" };
+  }
   return { ok: true };
 }
 
@@ -99,48 +124,68 @@ export function validateHexCoordinate(coord: HexCoordinate | null | undefined): 
   return { ok: true };
 }
 
-export function validateFleetPlacement(
-  p: FleetPlacement | null | undefined,
-): StructuralValidationResult {
+export function validateFleetPlacement(p: FleetPlacement | null | undefined): StructuralValidationResult {
   if (!p || typeof p !== "object") {
     return { ok: false, reason: "fleet_placement_missing" };
   }
   if (p.kind !== "fleet") {
     return { ok: false, reason: "fleet_placement_kind_invalid" };
   }
-  const idv = validateFleetPlacementId(p.id);
-  if (!idv.ok) return idv;
-  if (typeof p.entityTypeName !== "string" || p.entityTypeName.length === 0) {
-    return { ok: false, reason: "fleet_placement_entity_invalid" };
+  const pid = validateFleetPlacementId(p.placementId);
+  if (!pid.ok) return pid;
+  const eid = validateFleetEntityId(p.entityId);
+  if (!eid.ok) return eid;
+  if (!Array.isArray(p.occupiedHexIds) || p.occupiedHexIds.length === 0) {
+    return { ok: false, reason: "fleet_placement_occupied_invalid" };
   }
-  if (!Array.isArray(p.hexCoordinateIds) || p.hexCoordinateIds.length === 0) {
-    return { ok: false, reason: "fleet_placement_hexes_invalid" };
+  if (!Array.isArray(p.revealedHexIds)) {
+    return { ok: false, reason: "fleet_placement_revealed_invalid" };
   }
-  for (const hid of p.hexCoordinateIds) {
+  if (typeof p.destroyed !== "boolean") {
+    return { ok: false, reason: "fleet_placement_destroyed_invalid" };
+  }
+  if (typeof p.currentIntegrity !== "number" || !Number.isFinite(p.currentIntegrity)) {
+    return { ok: false, reason: "fleet_placement_integrity_invalid" };
+  }
+  for (const hid of p.occupiedHexIds) {
+    const hv = validateHexCoordinateId(hid);
+    if (!hv.ok) return hv;
+  }
+  for (const hid of p.revealedHexIds) {
     const hv = validateHexCoordinateId(hid);
     if (!hv.ok) return hv;
   }
   return { ok: true };
 }
 
-export function validateStructurePlacement(
-  p: StructurePlacement | null | undefined,
-): StructuralValidationResult {
+export function validateStructurePlacement(p: StructurePlacement | null | undefined): StructuralValidationResult {
   if (!p || typeof p !== "object") {
     return { ok: false, reason: "structure_placement_missing" };
   }
   if (p.kind !== "structure") {
     return { ok: false, reason: "structure_placement_kind_invalid" };
   }
-  const idv = validateStructurePlacementId(p.id);
-  if (!idv.ok) return idv;
-  if (typeof p.entityTypeName !== "string" || p.entityTypeName.length === 0) {
-    return { ok: false, reason: "structure_placement_entity_invalid" };
+  const pid = validateStructurePlacementId(p.placementId);
+  if (!pid.ok) return pid;
+  const eid = validateStructureEntityId(p.entityId);
+  if (!eid.ok) return eid;
+  if (!Array.isArray(p.occupiedHexIds) || p.occupiedHexIds.length === 0) {
+    return { ok: false, reason: "structure_placement_occupied_invalid" };
   }
-  if (!Array.isArray(p.hexCoordinateIds) || p.hexCoordinateIds.length === 0) {
-    return { ok: false, reason: "structure_placement_hexes_invalid" };
+  if (!Array.isArray(p.revealedHexIds)) {
+    return { ok: false, reason: "structure_placement_revealed_invalid" };
   }
-  for (const hid of p.hexCoordinateIds) {
+  if (typeof p.destroyed !== "boolean") {
+    return { ok: false, reason: "structure_placement_destroyed_invalid" };
+  }
+  if (typeof p.currentIntegrity !== "number" || !Number.isFinite(p.currentIntegrity)) {
+    return { ok: false, reason: "structure_placement_integrity_invalid" };
+  }
+  for (const hid of p.occupiedHexIds) {
+    const hv = validateHexCoordinateId(hid);
+    if (!hv.ok) return hv;
+  }
+  for (const hid of p.revealedHexIds) {
     const hv = validateHexCoordinateId(hid);
     if (!hv.ok) return hv;
   }

@@ -1,5 +1,18 @@
 import type { StructuralValidationResult } from "../../events/validators";
-import type { Board, CombatAttempt, Hex } from "@acerta/shared/schemas";
+import type { Board, CombatAttempt, EntityCatalog, Hex } from "@acerta/shared/schemas";
+
+export function validateEntityCatalog(catalog: EntityCatalog | null | undefined): StructuralValidationResult {
+  if (!catalog || typeof catalog !== "object") {
+    return { ok: false, reason: "entity_catalog_missing" };
+  }
+  if (!catalog.fleetUnits || typeof catalog.fleetUnits !== "object") {
+    return { ok: false, reason: "entity_catalog_fleet_invalid" };
+  }
+  if (!catalog.structures || typeof catalog.structures !== "object") {
+    return { ok: false, reason: "entity_catalog_structures_invalid" };
+  }
+  return { ok: true };
+}
 
 export function validateBoardSnapshot(board: Board | null | undefined): StructuralValidationResult {
   if (!board || typeof board !== "object") {
@@ -16,6 +29,9 @@ export function validateBoardSnapshot(board: Board | null | undefined): Structur
   }
   if (!board.generation || typeof board.generation !== "object") {
     return { ok: false, reason: "board_generation_meta_invalid" };
+  }
+  if (board.revealedTerrainHexIds !== undefined && !Array.isArray(board.revealedTerrainHexIds)) {
+    return { ok: false, reason: "board_terrain_reveals_invalid" };
   }
   return { ok: true };
 }
@@ -35,14 +51,28 @@ export function validateCombatAttemptPayload(
   return { ok: true };
 }
 
-export function validateHexForCombat(hex: Hex | undefined, targetHexId: string): StructuralValidationResult {
+function isHexIdRevealedByPlacements(board: Board, hexId: string): boolean {
+  for (const p of board.fleetPlacements) {
+    if (p.revealedHexIds.includes(hexId)) return true;
+  }
+  for (const p of board.structurePlacements) {
+    if (p.revealedHexIds.includes(hexId)) return true;
+  }
+  return false;
+}
+
+export function validateHexForCombat(board: Board, hexId: string): StructuralValidationResult {
+  const hex = board.hexes[hexId];
   if (!hex) {
     return { ok: false, reason: "hex_not_found" };
   }
-  if (hex.coordinate?.id !== targetHexId) {
+  if (hex.coordinate?.id !== hexId) {
     return { ok: false, reason: "hex_id_mismatch" };
   }
-  if (hex.revealed) {
+  if (isHexIdRevealedByPlacements(board, hexId)) {
+    return { ok: false, reason: "hex_already_revealed" };
+  }
+  if (board.revealedTerrainHexIds?.includes(hexId)) {
     return { ok: false, reason: "hex_already_revealed" };
   }
   if (hex.terrain !== "water" && hex.terrain !== "land") {

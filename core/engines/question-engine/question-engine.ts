@@ -1,4 +1,4 @@
-import type { Question, QuestionAttemptInput, QuestionValidationResult } from "./types";
+import type { Question, QuestionAttemptInput, QuestionValidationResult } from "@acerta/shared/schemas";
 import { validateQuestionAttemptInput, validateQuestionForProcessing } from "./validators";
 
 export function calculateResponseTimeMs(

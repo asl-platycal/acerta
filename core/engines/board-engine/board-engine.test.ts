@@ -14,6 +14,22 @@ import {
 } from "./board-engine";
 import type { FleetPlacement } from "@acerta/shared/schemas";
 
+function fleetPlacement(
+  placementId: string,
+  entityId: string,
+  occupiedHexIds: string[],
+): FleetPlacement {
+  return {
+    kind: "fleet",
+    placementId,
+    entityId,
+    occupiedHexIds,
+    revealedHexIds: [],
+    destroyed: false,
+    currentIntegrity: occupiedHexIds.length,
+  };
+}
+
 describe("board-engine", () => {
   it("createHexCoordinate produz id canónico hex:q:r", () => {
     const c = createHexCoordinate(2, 5);
@@ -72,12 +88,10 @@ describe("board-engine", () => {
     const b0 = computeShoreDistances(
       createBoard({ hexRadius: 1, scale: 1, mapWidthPx: 200, mapHeightPx: 200 }),
     );
-    const b = placeFleetUnit(b0, {
-      id: "fleet_unit:test-a",
-      kind: "fleet",
-      entityTypeName: "BOMBA NAVAL",
-      hexCoordinateIds: ["hex:5:5"],
-    });
+    const b = placeFleetUnit(
+      b0,
+      fleetPlacement("fleet_placement:test-a", "fleet_unit:test-a", ["hex:5:5"]),
+    );
     const v = validatePlacement(b, ["hex:5:6"], { expectedTerrain: "water", minDistToShore: 0 });
     expect(v.ok).toBe(false);
     expect(v.reason).toBe("placement_area_not_clear");
@@ -87,12 +101,7 @@ describe("board-engine", () => {
     const b0 = computeShoreDistances(
       createBoard({ hexRadius: 1, scale: 1, mapWidthPx: 60, mapHeightPx: 60 }),
     );
-    const b = placeFleetUnit(b0, {
-      id: "fleet_unit:x",
-      kind: "fleet",
-      entityTypeName: "BOMBA NAVAL",
-      hexCoordinateIds: ["hex:2:2"],
-    });
+    const b = placeFleetUnit(b0, fleetPlacement("fleet_placement:x", "fleet_unit:x", ["hex:2:2"]));
     const block = findSpecificBlock(b, 2, 2, 2, 2, "water", 0);
     expect(block).toBeNull();
   });
@@ -100,12 +109,10 @@ describe("board-engine", () => {
   it("placeFleetUnit não muta o board original", () => {
     const b0 = createBoard({ hexRadius: 1, scale: 1, mapWidthPx: 40, mapHeightPx: 40 });
     const snap = JSON.stringify(b0);
-    placeFleetUnit(b0, {
-      id: "fleet_unit:z",
-      kind: "fleet",
-      entityTypeName: "LANCHA ATAQUE",
-      hexCoordinateIds: ["hex:1:1", "hex:1:2"],
-    });
+    placeFleetUnit(
+      b0,
+      fleetPlacement("fleet_placement:z", "fleet_unit:z", ["hex:1:1", "hex:1:2"]),
+    );
     expect(JSON.stringify(b0)).toBe(snap);
   });
 });

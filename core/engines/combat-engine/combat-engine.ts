@@ -4,6 +4,7 @@ import type {
   CombatAttempt,
   CombatResult,
   DamageResult,
+  EntityCatalog,
   FleetPlacement,
   Hex,
   StructurePlacement,
@@ -11,6 +12,7 @@ import type {
 import {
   validateBoardSnapshot,
   validateCombatAttemptPayload,
+  validateEntityCatalog,
   validateHexForCombat,
 } from "./validators";
 
@@ -48,26 +50,54 @@ function findPlacement(
   board: Board,
   placementId: string,
 ): { placement: FleetPlacement | StructurePlacement; targetKind: "fleet_unit" | "structure" } | null {
-  const naval = board.fleetPlacements.find((u) => u.id === placementId);
+  const naval = board.fleetPlacements.find((u) => u.placementId === placementId);
   if (naval) return { placement: naval, targetKind: "fleet_unit" };
-  const land = board.structurePlacements.find((s) => s.id === placementId);
+  const land = board.structurePlacements.find((s) => s.placementId === placementId);
   if (land) return { placement: land, targetKind: "structure" };
   return null;
+}
+
+function resolveEntityType(catalog: EntityCatalog, placement: FleetPlacement | StructurePlacement): string {
+  if (placement.kind === "fleet") {
+    return catalog.fleetUnits[placement.entityId]?.entityType ?? "";
+  }
+  return catalog.structures[placement.entityId]?.entityType ?? "";
+}
+
+/**
+ * Consolida `revealedHexIds`, `currentIntegrity` e `destroyed` no placement após revelar um hex.
+ * Estado runtime exclusivo do placement (sem mutar o board).
+ */
+export function applyRevealToPlacement(
+  placement: FleetPlacement | StructurePlacement,
+  revealHexId: string,
+): FleetPlacement | StructurePlacement {
+  const revealed = new Set(placement.revealedHexIds);
+  revealed.add(revealHexId);
+  const revealedHexIds = placement.occupiedHexIds.filter((id) => revealed.has(id));
+  const currentIntegrity = placement.occupiedHexIds.length - revealedHexIds.length;
+  const destroyed = currentIntegrity === 0;
+  if (placement.kind === "fleet") {
+    return { ...placement, revealedHexIds, currentIntegrity, destroyed };
+  }
+  return { ...placement, revealedHexIds, currentIntegrity, destroyed };
 }
 
 export function validateCombatAttempt(
   board: Board,
   attempt: CombatAttempt,
+  entityCatalog: EntityCatalog,
 ): StructuralValidationResult {
   const bv = validateBoardSnapshot(board);
   if (!bv.ok) return bv;
+  const cv = validateEntityCatalog(entityCatalog);
+  if (!cv.ok) return cv;
   const av = validateCombatAttemptPayload(attempt);
   if (!av.ok) return av;
   if (!attempt.authorized) {
     return { ok: false, reason: "not_authorized" };
   }
-  const hex = board.hexes[attempt.target.hexId];
-  return validateHexForCombat(hex, attempt.target.hexId);
+  return validateHexForCombat(board, attempt.target.hexId);
 }
 
 export function resolveTargetHit(
@@ -77,30 +107,37 @@ export function resolveTargetHit(
   const bv = validateBoardSnapshot(board);
   if (!bv.ok) return { ok: false, reason: bv.reason ?? "board_invalid" };
   const hex = board.hexes[targetHexId];
-  const hv = validateHexForCombat(hex, targetHexId);
+  const hv = validateHexForCombat(board, targetHexId);
   if (!hv.ok) return { ok: false, reason: hv.reason ?? "hex_invalid" };
   const hitOccupant = hex!.occupancy !== undefined;
   return { ok: true, hex: hex!, hitOccupant };
 }
 
 export function resolveTargetDestruction(
-  board: Board,
   placement: FleetPlacement | StructurePlacement,
   revealHexId: string,
-): { fullyDestroyed: boolean; entityTypeName: string } {
-  const allRevealed = placement.hexCoordinateIds.every(
-    (id) => id === revealHexId || board.hexes[id]?.revealed === true,
-  );
-  return { fullyDestroyed: allRevealed, entityTypeName: placement.entityTypeName };
+): { fullyDestroyed: boolean; updated: FleetPlacement | StructurePlacement } {
+  const updated = applyRevealToPlacement(placement, revealHexId);
+  return { fullyDestroyed: updated.destroyed, updated };
 }
 
-function computeNavalSinkBombBonusParts(entityTypeName: string, hexCount: number): number {
-  return entityTypeName === "BOMBA NAVAL" ? 3 : hexCount;
+function computeNavalSinkBombBonusParts(entityType: string, hexCount: number): number {
+  return entityType === "BOMBA NAVAL" ? 3 : hexCount;
 }
 
-export function buildCombatResult(board: Board, attempt: CombatAttempt): CombatResult {
+function mergeRevealedTerrainHexIds(board: Board, hexId: string): readonly string[] {
+  const set = new Set(board.revealedTerrainHexIds ?? []);
+  set.add(hexId);
+  return [...set].sort();
+}
+
+export function buildCombatResult(
+  board: Board,
+  attempt: CombatAttempt,
+  entityCatalog: EntityCatalog,
+): CombatResult {
   const base: Pick<CombatResult, "targetHexId"> = { targetHexId: attempt.target.hexId };
-  const v = validateCombatAttempt(board, attempt);
+  const v = validateCombatAttempt(board, attempt, entityCatalog);
   if (!v.ok) {
     return {
       processed: false,
@@ -125,37 +162,44 @@ export function buildCombatResult(board: Board, attempt: CombatAttempt): CombatR
   let occupantDestroyed = false;
   let affectedPlacementId: string | undefined;
   let navalSinkBombBonusParts: number | undefined;
+  let updatedFleetPlacement: FleetPlacement | undefined;
+  let updatedStructurePlacement: StructurePlacement | undefined;
+  let updatedRevealedTerrainHexIds: readonly string[] | undefined;
 
   if (hitOccupant && hex.occupancy) {
     affectedPlacementId = hex.occupancy.placementId;
     const placementWrap = findPlacement(board, hex.occupancy.placementId);
-    const partial = pontosAcertoParcial(hex.occupancy.entityTypeName);
+    const entityType = placementWrap ? resolveEntityType(entityCatalog, placementWrap.placement) : "";
+    const partial = pontosAcertoParcial(entityType);
     let destructionBonus = 0;
 
     if (placementWrap) {
-      const { fullyDestroyed } = resolveTargetDestruction(
-        board,
-        placementWrap.placement,
-        attempt.target.hexId,
-      );
+      const { fullyDestroyed, updated } = resolveTargetDestruction(placementWrap.placement, attempt.target.hexId);
       occupantDestroyed = fullyDestroyed;
+      if (placementWrap.placement.kind === "fleet") {
+        updatedFleetPlacement = updated as FleetPlacement;
+      } else {
+        updatedStructurePlacement = updated as StructurePlacement;
+      }
       if (fullyDestroyed) {
-        destructionBonus = pontosDestruicaoAlvo(placementWrap.placement.entityTypeName);
+        destructionBonus = pontosDestruicaoAlvo(entityType);
       }
       if (
         attempt.applyNavalSinkBombBonusRule === true &&
         fullyDestroyed &&
-        placementWrap.placement.entityTypeName &&
+        entityType &&
         placementWrap.targetKind === "fleet_unit"
       ) {
         navalSinkBombBonusParts = computeNavalSinkBombBonusParts(
-          placementWrap.placement.entityTypeName,
-          placementWrap.placement.hexCoordinateIds.length,
+          entityType,
+          placementWrap.placement.occupiedHexIds.length,
         );
       }
     }
 
     damage = { partialHitValue: partial, destructionBonusValue: destructionBonus };
+  } else {
+    updatedRevealedTerrainHexIds = mergeRevealedTerrainHexIds(board, attempt.target.hexId);
   }
 
   return {
@@ -168,5 +212,8 @@ export function buildCombatResult(board: Board, attempt: CombatAttempt): CombatR
     affectedPlacementId,
     damage,
     navalSinkBombBonusParts,
+    updatedFleetPlacement,
+    updatedStructurePlacement,
+    updatedRevealedTerrainHexIds,
   };
 }

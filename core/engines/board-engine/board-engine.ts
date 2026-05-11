@@ -63,15 +63,32 @@ function cloneHex(h: Hex): Hex {
   };
 }
 
+function clonePlacementFleet(p: FleetPlacement): FleetPlacement {
+  return {
+    ...p,
+    occupiedHexIds: [...p.occupiedHexIds],
+    revealedHexIds: [...p.revealedHexIds],
+  };
+}
+
+function clonePlacementStructure(p: StructurePlacement): StructurePlacement {
+  return {
+    ...p,
+    occupiedHexIds: [...p.occupiedHexIds],
+    revealedHexIds: [...p.revealedHexIds],
+  };
+}
+
 function cloneBoard(board: Board): Board {
   return {
+    boardId: board.boardId,
     hexes: Object.fromEntries(Object.entries(board.hexes).map(([k, v]) => [k, cloneHex(v)])),
-    fleetPlacements: board.fleetPlacements.map((p) => ({ ...p, hexCoordinateIds: [...p.hexCoordinateIds] })),
-    structurePlacements: board.structurePlacements.map((p) => ({
-      ...p,
-      hexCoordinateIds: [...p.hexCoordinateIds],
-    })),
+    fleetPlacements: board.fleetPlacements.map(clonePlacementFleet),
+    structurePlacements: board.structurePlacements.map(clonePlacementStructure),
     generation: { ...board.generation },
+    ...(board.revealedTerrainHexIds !== undefined
+      ? { revealedTerrainHexIds: [...board.revealedTerrainHexIds] }
+      : {}),
   };
 }
 
@@ -97,7 +114,6 @@ export function generateHexGrid(config: BoardGenerationConfig): Board {
         world: { x, y },
         terrain,
         distToShore: Number.POSITIVE_INFINITY,
-        revealed: false,
       };
     }
   }
@@ -196,8 +212,8 @@ export function isSafeToPlace(hex: Hex, playable: PlayableAreaConfig, hexRadiusL
 }
 
 /** Espelha `isAreaClear` do protótipo: células do caminho vazias e vizinhos sem ocupação. */
-export function isAreaClear(board: Board, hexCoordinateIds: readonly string[]): boolean {
-  for (const id of hexCoordinateIds) {
+export function isAreaClear(board: Board, occupiedHexIds: readonly string[]): boolean {
+  for (const id of occupiedHexIds) {
     const h = board.hexes[id];
     if (!h || h.occupancy) return false;
     for (const n of getNeighborCoordinates(board, h.coordinate.q, h.coordinate.r)) {
@@ -285,18 +301,19 @@ function lighthouseCandidate(hex: Hex, board: Board): boolean {
 
 export function validatePlacement(
   board: Board,
-  hexCoordinateIds: readonly string[],
+  occupiedHexIds: readonly string[],
   ctx: {
     expectedTerrain: "water" | "land";
     minDistToShore: number;
     playable?: PlayableAreaConfig;
-    entityTypeName?: string;
+    /** Regra FAROL do protótipo — apenas tipo estático. */
+    entityType?: string;
   },
 ): PlacementValidationResult {
   const bv = validateBoardSnapshot(board);
   if (!bv.ok) return { ok: false, reason: bv.reason };
-  if (!hexCoordinateIds.length) return { ok: false, reason: "placement_hexes_empty" };
-  for (const id of hexCoordinateIds) {
+  if (!occupiedHexIds.length) return { ok: false, reason: "placement_hexes_empty" };
+  for (const id of occupiedHexIds) {
     const iv = validateHexCoordinateId(id);
     if (!iv.ok) return { ok: false, reason: iv.reason };
     const h = board.hexes[id];
@@ -310,11 +327,11 @@ export function validatePlacement(
         return { ok: false, reason: "placement_not_safe_margin" };
       }
     }
-    if (ctx.entityTypeName === "FAROL" && !lighthouseCandidate(h, board)) {
+    if (ctx.entityType === "FAROL" && !lighthouseCandidate(h, board)) {
       return { ok: false, reason: "placement_farol_rule_failed" };
     }
   }
-  if (!isAreaClear(board, hexCoordinateIds)) {
+  if (!isAreaClear(board, occupiedHexIds)) {
     return { ok: false, reason: "placement_area_not_clear" };
   }
   return { ok: true };
@@ -325,16 +342,16 @@ export function placeFleetUnit(board: Board, placement: FleetPlacement): Board {
   if (!pv.ok) throw new Error(pv.reason ?? "invalid_fleet_placement");
   if (placement.kind !== "fleet") throw new Error("fleet_placement_kind_invalid");
   const next = cloneBoard(board);
-  for (const id of placement.hexCoordinateIds) {
+  for (const id of placement.occupiedHexIds) {
     const h = next.hexes[id];
     if (!h) throw new Error("hex_not_found");
     h.occupancy = {
-      placementId: placement.id,
-      entityTypeName: placement.entityTypeName,
+      placementId: placement.placementId,
+      entityId: placement.entityId,
       domain: "naval",
     };
   }
-  next.fleetPlacements = [...next.fleetPlacements, { ...placement, hexCoordinateIds: [...placement.hexCoordinateIds] }];
+  next.fleetPlacements = [...next.fleetPlacements, clonePlacementFleet(placement)];
   return next;
 }
 
@@ -343,18 +360,15 @@ export function placeStructure(board: Board, placement: StructurePlacement): Boa
   if (!pv.ok) throw new Error(pv.reason ?? "invalid_structure_placement");
   if (placement.kind !== "structure") throw new Error("structure_placement_kind_invalid");
   const next = cloneBoard(board);
-  for (const id of placement.hexCoordinateIds) {
+  for (const id of placement.occupiedHexIds) {
     const h = next.hexes[id];
     if (!h) throw new Error("hex_not_found");
     h.occupancy = {
-      placementId: placement.id,
-      entityTypeName: placement.entityTypeName,
+      placementId: placement.placementId,
+      entityId: placement.entityId,
       domain: "land",
     };
   }
-  next.structurePlacements = [
-    ...next.structurePlacements,
-    { ...placement, hexCoordinateIds: [...placement.hexCoordinateIds] },
-  ];
+  next.structurePlacements = [...next.structurePlacements, clonePlacementStructure(placement)];
   return next;
 }

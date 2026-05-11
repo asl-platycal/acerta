@@ -1,5 +1,5 @@
 import type { StructuralValidationResult } from "../../events/validators";
-import type { Question, QuestionAttemptInput } from "./types";
+import type { Question, QuestionAttemptInput } from "@acerta/shared/schemas";
 
 export function validateQuestionForProcessing(
   question: Question | null | undefined,
