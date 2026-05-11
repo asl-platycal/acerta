@@ -3,10 +3,13 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "npm run build --prefix apps/web",
+    "dev": "npm run dev --prefix apps/web",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "devDependencies": {
+    "tsx": "~4.19.2",
     "typescript": "~5.6.3",
     "vitest": "~2.1.6"
   }

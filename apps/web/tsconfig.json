@@ -2,6 +2,8 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "baseUrl": ".",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "noEmit": true,
     "paths": {
       "@/*": ["src/*"],
       "@acerta/core": ["../../core/index.ts"],
@@ -14,5 +16,13 @@
       "@acerta/tests/*": ["../../tests/*"]
     }
   },
-  "include": ["src"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "vite.config.ts",
+    "../../core/**/*.ts",
+    "../../shared/**/*.ts",
+    "../../services/**/*.ts"
+  ],
+  "exclude": ["**/*.test.ts", "../../tests/**"]
 }
