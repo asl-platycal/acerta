@@ -2,13 +2,19 @@ import type { StructuralValidationResult } from "../../events/validators";
 import type {
   Board,
   CombatAttempt,
-  CombatResult,
   DamageResult,
   EntityCatalog,
   FleetPlacement,
   Hex,
+  RuntimeStatePatch,
   StructurePlacement,
+  TargetType,
 } from "@acerta/shared/schemas";
+import type { RuntimeActionContext } from "@acerta/shared/schemas/runtime-sequence";
+import {
+  buildPlacementPatchBetween,
+  buildTerrainRevealPatchForHex,
+} from "../../events/runtime-patch-builder";
 import {
   validateBoardSnapshot,
   validateCombatAttemptPayload,
@@ -103,117 +109,299 @@ export function validateCombatAttempt(
 export function resolveTargetHit(
   board: Board,
   targetHexId: string,
-): { ok: true; hex: Hex; hitOccupant: boolean } | { ok: false; reason: string } {
+  runtimeContext: RuntimeActionContext,
+): RuntimeStatePatch {
   const bv = validateBoardSnapshot(board);
-  if (!bv.ok) return { ok: false, reason: bv.reason ?? "board_invalid" };
-  const hex = board.hexes[targetHexId];
+  if (!bv.ok) {
+    return {
+      sequenceNumber: runtimeContext.sequenceNumber,
+      timestamp: runtimeContext.timestamp,
+      targetHexId,
+      outcome: {
+        processed: false,
+        terrain: "water",
+        hitOccupant: false,
+        targetKind: "none",
+        occupantDestroyed: false,
+        error: bv.reason ?? "board_invalid",
+      },
+    };
+  }
   const hv = validateHexForCombat(board, targetHexId);
-  if (!hv.ok) return { ok: false, reason: hv.reason ?? "hex_invalid" };
-  const hitOccupant = hex!.occupancy !== undefined;
-  return { ok: true, hex: hex!, hitOccupant };
+  if (!hv.ok) {
+    return {
+      sequenceNumber: runtimeContext.sequenceNumber,
+      timestamp: runtimeContext.timestamp,
+      targetHexId,
+      outcome: {
+        processed: false,
+        terrain: "water",
+        hitOccupant: false,
+        targetKind: "none",
+        occupantDestroyed: false,
+        error: hv.reason ?? "hex_invalid",
+      },
+    };
+  }
+  const hex = board.hexes[targetHexId]!;
+  const hitOccupant = hex.occupancy !== undefined;
+  const targetKind: TargetType = hitOccupant
+    ? hex.occupancy!.domain === "naval"
+      ? "fleet_unit"
+      : "structure"
+    : "none";
+  if (!hitOccupant) {
+    const terrainReveal = buildTerrainRevealPatchForHex(board, targetHexId);
+    return {
+      sequenceNumber: runtimeContext.sequenceNumber,
+      timestamp: runtimeContext.timestamp,
+      targetHexId,
+      terrainReveal,
+      outcome: {
+        processed: true,
+        terrain: hex.terrain,
+        hitOccupant,
+        targetKind,
+        occupantDestroyed: false,
+      },
+    };
+  }
+  const wrap = findPlacement(board, hex.occupancy!.placementId);
+  if (!wrap) {
+    return {
+      sequenceNumber: runtimeContext.sequenceNumber,
+      timestamp: runtimeContext.timestamp,
+      targetHexId,
+      outcome: {
+        processed: false,
+        terrain: hex.terrain,
+        hitOccupant: true,
+        targetKind,
+        occupantDestroyed: false,
+        error: "occupancy_without_placement",
+      },
+    };
+  }
+  const prev = wrap.placement;
+  const updated = applyRevealToPlacement(prev, targetHexId);
+  const placementPatch = buildPlacementPatchBetween(prev, updated);
+  if (!placementPatch) {
+    return {
+      sequenceNumber: runtimeContext.sequenceNumber,
+      timestamp: runtimeContext.timestamp,
+      targetHexId,
+      outcome: {
+        processed: false,
+        terrain: hex.terrain,
+        hitOccupant: true,
+        targetKind,
+        occupantDestroyed: prev.destroyed,
+        error: "target_reveal_noop",
+      },
+    };
+  }
+  return {
+    sequenceNumber: runtimeContext.sequenceNumber,
+    timestamp: runtimeContext.timestamp,
+    targetHexId,
+    placementPatch,
+    outcome: {
+      processed: true,
+      terrain: hex.terrain,
+      hitOccupant: true,
+      targetKind,
+      occupantDestroyed: updated.destroyed,
+    },
+  };
 }
 
 export function resolveTargetDestruction(
   placement: FleetPlacement | StructurePlacement,
   revealHexId: string,
-): { fullyDestroyed: boolean; updated: FleetPlacement | StructurePlacement } {
+  ctx: {
+    targetHexId: string;
+    terrain: "water" | "land";
+    runtimeContext: RuntimeActionContext;
+  },
+): RuntimeStatePatch {
+  const previous = placement;
   const updated = applyRevealToPlacement(placement, revealHexId);
-  return { fullyDestroyed: updated.destroyed, updated };
+  const placementPatch = buildPlacementPatchBetween(previous, updated);
+  if (!placementPatch) {
+    return {
+      sequenceNumber: ctx.runtimeContext.sequenceNumber,
+      timestamp: ctx.runtimeContext.timestamp,
+      targetHexId: ctx.targetHexId,
+      outcome: {
+        processed: false,
+        terrain: ctx.terrain,
+        hitOccupant: true,
+        targetKind: previous.kind === "fleet" ? "fleet_unit" : "structure",
+        occupantDestroyed: previous.destroyed,
+        error: "placement_reveal_noop",
+      },
+    };
+  }
+  return {
+    sequenceNumber: ctx.runtimeContext.sequenceNumber,
+    timestamp: ctx.runtimeContext.timestamp,
+    targetHexId: ctx.targetHexId,
+    placementPatch,
+    outcome: {
+      processed: true,
+      terrain: ctx.terrain,
+      hitOccupant: true,
+      targetKind: previous.kind === "fleet" ? "fleet_unit" : "structure",
+      occupantDestroyed: updated.destroyed,
+    },
+  };
 }
 
 function computeNavalSinkBombBonusParts(entityType: string, hexCount: number): number {
   return entityType === "BOMBA NAVAL" ? 3 : hexCount;
 }
 
-function mergeRevealedTerrainHexIds(board: Board, hexId: string): readonly string[] {
-  const set = new Set(board.revealedTerrainHexIds ?? []);
-  set.add(hexId);
-  return [...set].sort();
-}
-
 export function buildCombatResult(
   board: Board,
   attempt: CombatAttempt,
   entityCatalog: EntityCatalog,
-): CombatResult {
-  const base: Pick<CombatResult, "targetHexId"> = { targetHexId: attempt.target.hexId };
+  runtimeContext: RuntimeActionContext,
+): RuntimeStatePatch {
+  const seq = runtimeContext.sequenceNumber;
+  const ts = runtimeContext.timestamp;
+  const targetHexId = attempt.target.hexId;
   const v = validateCombatAttempt(board, attempt, entityCatalog);
   if (!v.ok) {
     return {
-      processed: false,
-      ...base,
-      terrain: "water",
-      hitOccupant: false,
-      targetKind: "none",
-      occupantDestroyed: false,
-      error: v.reason,
+      sequenceNumber: seq,
+      timestamp: ts,
+      targetHexId,
+      outcome: {
+        processed: false,
+        terrain: "water",
+        hitOccupant: false,
+        targetKind: "none",
+        occupantDestroyed: false,
+        error: v.reason,
+      },
     };
   }
 
-  const hex = board.hexes[attempt.target.hexId]!;
+  const hex = board.hexes[targetHexId]!;
   const hitOccupant = hex.occupancy !== undefined;
-  const targetKind: CombatResult["targetKind"] = hitOccupant
+  const targetKind: TargetType = hitOccupant
     ? hex.occupancy!.domain === "naval"
       ? "fleet_unit"
       : "structure"
     : "none";
 
-  let damage: DamageResult | undefined;
-  let occupantDestroyed = false;
-  let affectedPlacementId: string | undefined;
-  let navalSinkBombBonusParts: number | undefined;
-  let updatedFleetPlacement: FleetPlacement | undefined;
-  let updatedStructurePlacement: StructurePlacement | undefined;
-  let updatedRevealedTerrainHexIds: readonly string[] | undefined;
-
   if (hitOccupant && hex.occupancy) {
-    affectedPlacementId = hex.occupancy.placementId;
+    let damage: DamageResult | undefined;
+    let occupantDestroyed = false;
+    let navalSinkBombBonusParts: number | undefined;
+    let placementPatch = undefined;
+
     const placementWrap = findPlacement(board, hex.occupancy.placementId);
     const entityType = placementWrap ? resolveEntityType(entityCatalog, placementWrap.placement) : "";
     const partial = pontosAcertoParcial(entityType);
     let destructionBonus = 0;
 
-    if (placementWrap) {
-      const { fullyDestroyed, updated } = resolveTargetDestruction(placementWrap.placement, attempt.target.hexId);
-      occupantDestroyed = fullyDestroyed;
-      if (placementWrap.placement.kind === "fleet") {
-        updatedFleetPlacement = updated as FleetPlacement;
-      } else {
-        updatedStructurePlacement = updated as StructurePlacement;
-      }
-      if (fullyDestroyed) {
-        destructionBonus = pontosDestruicaoAlvo(entityType);
-      }
-      if (
-        attempt.applyNavalSinkBombBonusRule === true &&
-        fullyDestroyed &&
-        entityType &&
-        placementWrap.targetKind === "fleet_unit"
-      ) {
-        navalSinkBombBonusParts = computeNavalSinkBombBonusParts(
-          entityType,
-          placementWrap.placement.occupiedHexIds.length,
-        );
-      }
+    if (!placementWrap) {
+      return {
+        sequenceNumber: seq,
+        timestamp: ts,
+        targetHexId,
+        outcome: {
+          processed: false,
+          terrain: hex.terrain,
+          hitOccupant: true,
+          targetKind,
+          occupantDestroyed: false,
+          error: "occupancy_without_placement",
+        },
+      };
+    }
+    const prev = placementWrap.placement;
+    const updated = applyRevealToPlacement(prev, attempt.target.hexId);
+    occupantDestroyed = updated.destroyed;
+    placementPatch = buildPlacementPatchBetween(prev, updated);
+    if (!placementPatch) {
+      return {
+        sequenceNumber: seq,
+        timestamp: ts,
+        targetHexId,
+        outcome: {
+          processed: false,
+          terrain: hex.terrain,
+          hitOccupant: true,
+          targetKind,
+          occupantDestroyed: prev.destroyed,
+          error: "combat_reveal_noop",
+        },
+      };
+    }
+    if (updated.destroyed) {
+      destructionBonus = pontosDestruicaoAlvo(entityType);
+    }
+    if (
+      attempt.applyNavalSinkBombBonusRule === true &&
+      updated.destroyed &&
+      entityType &&
+      placementWrap.targetKind === "fleet_unit"
+    ) {
+      navalSinkBombBonusParts = computeNavalSinkBombBonusParts(
+        entityType,
+        placementWrap.placement.occupiedHexIds.length,
+      );
     }
 
     damage = { partialHitValue: partial, destructionBonusValue: destructionBonus };
-  } else {
-    updatedRevealedTerrainHexIds = mergeRevealedTerrainHexIds(board, attempt.target.hexId);
+
+    return {
+      sequenceNumber: seq,
+      timestamp: ts,
+      targetHexId,
+      placementPatch,
+      outcome: {
+        processed: true,
+        terrain: hex.terrain,
+        hitOccupant,
+        targetKind,
+        occupantDestroyed,
+        damage,
+        navalSinkBombBonusParts,
+      },
+    };
+  }
+
+  const terrainReveal = buildTerrainRevealPatchForHex(board, targetHexId);
+  if (!terrainReveal) {
+    return {
+      sequenceNumber: seq,
+      timestamp: ts,
+      targetHexId,
+      outcome: {
+        processed: false,
+        terrain: hex.terrain,
+        hitOccupant: false,
+        targetKind: "none",
+        occupantDestroyed: false,
+        error: "terrain_reveal_noop",
+      },
+    };
   }
 
   return {
-    processed: true,
-    targetHexId: attempt.target.hexId,
-    terrain: hex.terrain,
-    hitOccupant,
-    targetKind,
-    occupantDestroyed,
-    affectedPlacementId,
-    damage,
-    navalSinkBombBonusParts,
-    updatedFleetPlacement,
-    updatedStructurePlacement,
-    updatedRevealedTerrainHexIds,
+    sequenceNumber: seq,
+    timestamp: ts,
+    targetHexId,
+    terrainReveal,
+    outcome: {
+      processed: true,
+      terrain: hex.terrain,
+      hitOccupant,
+      targetKind,
+      occupantDestroyed: false,
+    },
   };
 }
