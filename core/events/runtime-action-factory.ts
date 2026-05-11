@@ -33,27 +33,79 @@ function assertContextMatchesPatch(context: RuntimeActionContext, patch: Runtime
   }
 }
 
-function assertScoreMatchesCombatPatch(patch: RuntimeStatePatch, score: RuntimeScoreMetadata): void {
-  const d = patch.outcome.damage;
-  if (d !== undefined) {
-    if (score.partialHitValue !== d.partialHitValue) {
-      throw new RuntimeActionEnvelopeBuildError(
-        "runtime envelope: score.partialHitValue must match patch.outcome.damage",
-        "score_partial_mismatch",
-      );
-    }
-    if (score.destructionBonusValue !== d.destructionBonusValue) {
-      throw new RuntimeActionEnvelopeBuildError(
-        "runtime envelope: score.destructionBonusValue must match patch.outcome.damage",
-        "score_destruction_mismatch",
-      );
-    }
-  } else if (score.partialHitValue !== undefined || score.destructionBonusValue !== undefined) {
+function assertFiniteNonNegative(name: string, n: number): void {
+  if (typeof n !== "number" || !Number.isFinite(n) || n < 0) {
+    throw new RuntimeActionEnvelopeBuildError(`runtime envelope: ${name} must be a finite number >= 0`, "score_field_invalid");
+  }
+}
+
+/** Consolidação única: campos explícitos de `damage` → metadados de envelope (sem reinterpretar `damage`). */
+export function consolidateCombatScoreFromPatch(patch: RuntimeStatePatch): RuntimeScoreMetadata {
+  if (!patch.outcome.processed) {
+    return {
+      partialHitScoreDelta: 0,
+      destructionScoreDelta: 0,
+      tacticalScoreDelta: 0,
+      cognitiveScoreDelta: 0,
+      bonusScoreDelta: 0,
+      totalScoreDelta: 0,
+    };
+  }
+  if (!patch.outcome.damage) {
     throw new RuntimeActionEnvelopeBuildError(
-      "runtime envelope: score must not set hit/destruction points when patch has no damage",
-      "score_unexpected_damage_fields",
+      "runtime envelope: processed combat patch requires outcome.damage",
+      "patch_damage_missing",
     );
   }
+  const d = patch.outcome.damage;
+  const partialHitScoreDelta = d.partialHitScore;
+  const destructionScoreDelta = d.destructionScore;
+  const tacticalScoreDelta = d.tacticalBonusScore;
+  const bonusScoreDelta = d.navalSinkBombBonusParts;
+  const cognitiveScoreDelta = 0;
+
+  assertFiniteNonNegative("partialHitScoreDelta", partialHitScoreDelta);
+  assertFiniteNonNegative("destructionScoreDelta", destructionScoreDelta);
+  assertFiniteNonNegative("tacticalScoreDelta", tacticalScoreDelta);
+  assertFiniteNonNegative("cognitiveScoreDelta", cognitiveScoreDelta);
+  assertFiniteNonNegative("bonusScoreDelta", bonusScoreDelta);
+
+  const totalScoreDelta =
+    partialHitScoreDelta + destructionScoreDelta + tacticalScoreDelta + cognitiveScoreDelta + bonusScoreDelta;
+  if (!Number.isFinite(totalScoreDelta)) {
+    throw new RuntimeActionEnvelopeBuildError("runtime envelope: totalScoreDelta invalid", "score_total_invalid");
+  }
+
+  return {
+    partialHitScoreDelta,
+    destructionScoreDelta,
+    tacticalScoreDelta,
+    cognitiveScoreDelta,
+    bonusScoreDelta,
+    totalScoreDelta,
+  };
+}
+
+/**
+ * Pontuação cognitiva mínima por resposta (regra local até haver tabela oficial).
+ * Demais deltas explicitamente zero.
+ */
+export function consolidateQuestionScoreFromValidation(questionValidation: QuestionValidationResult): RuntimeScoreMetadata {
+  const partialHitScoreDelta = 0;
+  const destructionScoreDelta = 0;
+  const tacticalScoreDelta = 0;
+  const cognitiveScoreDelta = questionValidation.correct ? 1 : 0;
+  const bonusScoreDelta = 0;
+  const totalScoreDelta =
+    partialHitScoreDelta + destructionScoreDelta + tacticalScoreDelta + cognitiveScoreDelta + bonusScoreDelta;
+  return {
+    partialHitScoreDelta,
+    destructionScoreDelta,
+    tacticalScoreDelta,
+    cognitiveScoreDelta,
+    bonusScoreDelta,
+    totalScoreDelta,
+  };
 }
 
 function assertAnalyticsMatchesCombatPatch(patch: RuntimeStatePatch, analytics: RuntimeAnalyticsMetadata): void {
@@ -80,10 +132,9 @@ function assertAnalyticsMatchesCombatPatch(patch: RuntimeStatePatch, analytics: 
 export function buildCombatRuntimeActionEnvelope(input: {
   readonly runtimeContext: RuntimeActionContext;
   readonly patch: RuntimeStatePatch;
-  readonly score: RuntimeScoreMetadata;
   readonly analytics: RuntimeAnalyticsMetadata;
 }): RuntimeActionEnvelope {
-  const { runtimeContext, patch, score, analytics } = input;
+  const { runtimeContext, patch, analytics } = input;
   if (!runtimeContext || typeof runtimeContext !== "object") {
     throw new RuntimeActionEnvelopeBuildError("runtime envelope: runtimeContext is required", "missing_context");
   }
@@ -91,8 +142,8 @@ export function buildCombatRuntimeActionEnvelope(input: {
     throw new RuntimeActionEnvelopeBuildError("runtime envelope: patch is required for combat_shot", "missing_patch");
   }
   assertContextMatchesPatch(runtimeContext, patch);
-  assertScoreMatchesCombatPatch(patch, score);
   assertAnalyticsMatchesCombatPatch(patch, analytics);
+  const score = consolidateCombatScoreFromPatch(patch);
 
   const actionOutcome: RuntimeActionOutcome = {
     kind: "combat",
@@ -116,13 +167,12 @@ export function buildCombatRuntimeActionEnvelope(input: {
 export function buildQuestionRuntimeActionEnvelope(input: {
   readonly runtimeContext: RuntimeActionContext;
   readonly questionValidation: QuestionValidationResult;
-  readonly score: RuntimeScoreMetadata;
   readonly analytics: RuntimeAnalyticsMetadata;
   readonly patch?: RuntimeStatePatch;
   readonly pedagogical?: Readonly<Record<string, string>>;
   readonly tactical?: Readonly<Record<string, string>>;
 }): RuntimeActionEnvelope {
-  const { runtimeContext, questionValidation, score, analytics, patch, pedagogical, tactical } = input;
+  const { runtimeContext, questionValidation, analytics, patch, pedagogical, tactical } = input;
   if (!runtimeContext || typeof runtimeContext !== "object") {
     throw new RuntimeActionEnvelopeBuildError("runtime envelope: runtimeContext is required", "missing_context");
   }
@@ -150,6 +200,8 @@ export function buildQuestionRuntimeActionEnvelope(input: {
       "analytics_response_time_mismatch",
     );
   }
+
+  const score = consolidateQuestionScoreFromValidation(questionValidation);
 
   const actionOutcome: RuntimeActionOutcome = {
     kind: "question",

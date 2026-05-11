@@ -21,13 +21,18 @@ export type RuntimeActionOutcome =
       readonly error?: string;
     };
 
-/** Metadados de pontuação (sem sistema de ranking completo). */
+/**
+ * Resultado competitivo já consolidado por ação (deltas explícitos).
+ * Nenhuma camada superior deve reinterpretar `DamageResult` do patch (deltas explícitos no envelope).
+ */
 export interface RuntimeScoreMetadata {
-  readonly partialHitValue?: number;
-  readonly destructionBonusValue?: number;
-  readonly cognitiveScore?: number;
-  readonly tacticalScore?: number;
-  readonly bonus?: Readonly<Record<string, number>>;
+  readonly partialHitScoreDelta: number;
+  readonly destructionScoreDelta: number;
+  readonly tacticalScoreDelta: number;
+  readonly cognitiveScoreDelta: number;
+  readonly bonusScoreDelta: number;
+  /** Soma determinística dos deltas acima (replay/analytics). */
+  readonly totalScoreDelta: number;
 }
 
 /** Metadados para analytics futuro (sem pipeline). */

@@ -10,8 +10,14 @@ export interface CombatAttempt {
   applyNavalSinkBombBonusRule?: boolean;
 }
 
+/**
+ * Semântica competitiva explícita por disparo (valores numéricos ≥ 0; zeros válidos).
+ * Campos táticos/navais separados para replay sem inferência.
+ */
 export interface DamageResult {
-  partialHitValue: number;
-  destructionBonusValue: number;
+  readonly partialHitScore: number;
+  readonly destructionScore: number;
+  readonly tacticalBonusScore: number;
+  readonly navalSinkBombBonusParts: number;
 }
 

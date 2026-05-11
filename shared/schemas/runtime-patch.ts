@@ -36,8 +36,8 @@ export interface RuntimeStatePatchOutcome {
   readonly hitOccupant: boolean;
   readonly targetKind: TargetType;
   readonly occupantDestroyed: boolean;
+  /** Obrigatório quando `processed === true` (inclui disparo em vazio: zeros explícitos). */
   readonly damage?: DamageResult;
-  readonly navalSinkBombBonusParts?: number;
   readonly error?: string;
 }
 

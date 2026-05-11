@@ -1,5 +1,5 @@
 import type { StructuralValidationResult } from "./validators";
-import type { Board, FleetPlacement, StructurePlacement } from "@acerta/shared/schemas";
+import type { Board, DamageResult, FleetPlacement, StructurePlacement } from "@acerta/shared/schemas";
 import type {
   PlacementPatch,
   RuntimePatchType,
@@ -187,6 +187,52 @@ function outcomeMatchesPatchPayload(patch: RuntimeStatePatch): StructuralValidat
   return { ok: true };
 }
 
+function validateDamageResultStruct(d: DamageResult): StructuralValidationResult {
+  const keys: (keyof DamageResult)[] = [
+    "partialHitScore",
+    "destructionScore",
+    "tacticalBonusScore",
+    "navalSinkBombBonusParts",
+  ];
+  for (const k of keys) {
+    const v = d[k];
+    if (typeof v !== "number" || !Number.isFinite(v) || v < 0 || !Number.isInteger(v)) {
+      return { ok: false, reason: "patch_damage_field_invalid" };
+    }
+  }
+  return { ok: true };
+}
+
+function validateOutcomeDamageCoherence(patch: RuntimeStatePatch): StructuralValidationResult {
+  const o = patch.outcome;
+  if (!o.processed) {
+    if (o.damage !== undefined) {
+      return { ok: false, reason: "patch_damage_when_unprocessed" };
+    }
+    return { ok: true };
+  }
+  if (!o.damage) {
+    return { ok: false, reason: "patch_missing_damage_when_processed" };
+  }
+  const st = validateDamageResultStruct(o.damage);
+  if (!st.ok) return st;
+  const d = o.damage;
+  if (!o.hitOccupant && o.targetKind === "none") {
+    if (
+      d.partialHitScore !== 0 ||
+      d.destructionScore !== 0 ||
+      d.tacticalBonusScore !== 0 ||
+      d.navalSinkBombBonusParts !== 0
+    ) {
+      return { ok: false, reason: "patch_damage_must_be_zero_on_miss" };
+    }
+  }
+  if (o.hitOccupant && o.targetKind !== "none" && !o.occupantDestroyed && d.destructionScore !== 0) {
+    return { ok: false, reason: "patch_destruction_score_without_destruction" };
+  }
+  return { ok: true };
+}
+
 /**
  * Valida consistência estrutural do patch contra o board (sem mutar estado).
  */
@@ -220,6 +266,8 @@ export function validateRuntimeStatePatch(board: Board, patch: RuntimeStatePatch
   }
   const amb = outcomeMatchesPatchPayload(patch);
   if (!amb.ok) return amb;
+  const dmg = validateOutcomeDamageCoherence(patch);
+  if (!dmg.ok) return dmg;
   if (patch.placementPatch) {
     const pv = validatePlacementPatch(board, patch.placementPatch);
     if (!pv.ok) return pv;

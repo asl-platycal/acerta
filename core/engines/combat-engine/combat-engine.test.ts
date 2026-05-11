@@ -128,8 +128,10 @@ describe("combat-engine", () => {
     expect(r.outcome.processed).toBe(true);
     expect(r.outcome.hitOccupant).toBe(true);
     expect(r.outcome.occupantDestroyed).toBe(false);
-    expect(r.outcome.damage?.partialHitValue).toBe(pontosAcertoParcial("FRAGATA"));
-    expect(r.outcome.damage?.destructionBonusValue).toBe(0);
+    expect(r.outcome.damage?.partialHitScore).toBe(pontosAcertoParcial("FRAGATA"));
+    expect(r.outcome.damage?.destructionScore).toBe(0);
+    expect(r.outcome.damage?.tacticalBonusScore).toBe(0);
+    expect(r.outcome.damage?.navalSinkBombBonusParts).toBe(0);
     expect(r.placementPatch?.placementId).toBe("fleet_placement:fr-1");
     expect(r.placementPatch?.newlyRevealedHexIds).toEqual(["hex:0:0"]);
     expect(r.placementPatch?.integrityDelta).toBe(-1);
@@ -151,7 +153,12 @@ describe("combat-engine", () => {
     expect(r.outcome.processed).toBe(true);
     expect(r.outcome.hitOccupant).toBe(false);
     expect(r.outcome.targetKind).toBe("none");
-    expect(r.outcome.damage).toBeUndefined();
+    expect(r.outcome.damage).toEqual({
+      partialHitScore: 0,
+      destructionScore: 0,
+      tacticalBonusScore: 0,
+      navalSinkBombBonusParts: 0,
+    });
     expect(r.terrainReveal?.newlyRevealedTerrainHexIds).toEqual(["hex:1:1"]);
     expect(r.placementPatch).toBeUndefined();
   });
@@ -179,7 +186,7 @@ describe("combat-engine", () => {
     const r = buildCombatResult(board, { target: { hexId: "hex:2:1" }, authorized: true }, catalogLn, ctx);
     expect(validateRuntimeStatePatch(board, r).ok).toBe(true);
     expect(r.outcome.occupantDestroyed).toBe(true);
-    expect(r.outcome.damage?.destructionBonusValue).toBe(pontosDestruicaoAlvo("LANCHA ATAQUE"));
+    expect(r.outcome.damage?.destructionScore).toBe(pontosDestruicaoAlvo("LANCHA ATAQUE"));
     expect(r.placementPatch?.patchType).toBe("destruction");
     expect(r.placementPatch?.destroyedTransition).toEqual({ from: false, to: true });
     expect(r.placementPatch?.integrityDelta).toBe(-1);
@@ -212,7 +219,7 @@ describe("combat-engine", () => {
     expect(validateRuntimeStatePatch(board, r).ok).toBe(true);
     expect(r.outcome.targetKind).toBe("structure");
     expect(r.outcome.occupantDestroyed).toBe(true);
-    expect(r.outcome.damage?.destructionBonusValue).toBe(pontosDestruicaoAlvo("FAROL"));
+    expect(r.outcome.damage?.destructionScore).toBe(pontosDestruicaoAlvo("FAROL"));
     expect(r.placementPatch?.patchType).toBe("destruction");
   });
 
@@ -250,6 +257,17 @@ describe("combat-engine", () => {
       targetHexId: "hex:5:5",
       terrain: "water",
       runtimeContext: ctx,
+      entityCatalog: {
+        fleetUnits: {
+          "fleet_unit:u": {
+            entityId: "fleet_unit:u",
+            entityType: "FRAGATA",
+            category: "naval",
+            sizeInHexes: 1,
+          },
+        },
+        structures: {},
+      },
     });
     expect(dest.outcome.occupantDestroyed).toBe(true);
     expect(dest.placementPatch?.patchType).toBe("destruction");

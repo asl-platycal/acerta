@@ -13,7 +13,9 @@
       "@acerta/services": ["../../services/index.ts"],
       "@acerta/services/*": ["../../services/*"],
       "@acerta/backend/*": ["../../backend/*"],
-      "@acerta/tests/*": ["../../tests/*"]
+      "@acerta/tests/*": ["../../tests/*"],
+      "@acerta/types": ["../../types/index.ts"],
+      "@acerta/types/*": ["../../types/*"]
     }
   },
   "include": [
@@ -22,7 +24,8 @@
     "vite.config.ts",
     "../../core/**/*.ts",
     "../../shared/**/*.ts",
-    "../../services/**/*.ts"
+    "../../services/**/*.ts",
+    "../../types/**/*.ts"
   ],
   "exclude": ["**/*.test.ts", "../../tests/**"]
 }

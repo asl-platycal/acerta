@@ -52,6 +52,24 @@ export function pontosDestruicaoAlvo(unitName: string): number {
   return PONTOS_LINHA_DESTRUICAO[i]! | 0;
 }
 
+function zeroDamage(): DamageResult {
+  return {
+    partialHitScore: 0,
+    destructionScore: 0,
+    tacticalBonusScore: 0,
+    navalSinkBombBonusParts: 0,
+  };
+}
+
+function damageForOccupantReveal(entityType: string, fullyDestroyed: boolean, navalSinkBombBonusParts: number): DamageResult {
+  return {
+    partialHitScore: pontosAcertoParcial(entityType),
+    destructionScore: fullyDestroyed ? pontosDestruicaoAlvo(entityType) : 0,
+    tacticalBonusScore: 0,
+    navalSinkBombBonusParts,
+  };
+}
+
 function findPlacement(
   board: Board,
   placementId: string,
@@ -110,6 +128,7 @@ export function resolveTargetHit(
   board: Board,
   targetHexId: string,
   runtimeContext: RuntimeActionContext,
+  entityCatalog?: EntityCatalog,
 ): RuntimeStatePatch {
   const bv = validateBoardSnapshot(board);
   if (!bv.ok) {
@@ -163,6 +182,7 @@ export function resolveTargetHit(
         hitOccupant,
         targetKind,
         occupantDestroyed: false,
+        damage: zeroDamage(),
       },
     };
   }
@@ -200,6 +220,9 @@ export function resolveTargetHit(
       },
     };
   }
+  const entityType =
+    entityCatalog !== undefined ? resolveEntityType(entityCatalog, prev) : "";
+  const damage = damageForOccupantReveal(entityType, updated.destroyed, 0);
   return {
     sequenceNumber: runtimeContext.sequenceNumber,
     timestamp: runtimeContext.timestamp,
@@ -211,6 +234,7 @@ export function resolveTargetHit(
       hitOccupant: true,
       targetKind,
       occupantDestroyed: updated.destroyed,
+      damage,
     },
   };
 }
@@ -222,6 +246,7 @@ export function resolveTargetDestruction(
     targetHexId: string;
     terrain: "water" | "land";
     runtimeContext: RuntimeActionContext;
+    entityCatalog?: EntityCatalog;
   },
 ): RuntimeStatePatch {
   const previous = placement;
@@ -242,6 +267,9 @@ export function resolveTargetDestruction(
       },
     };
   }
+  const entityType =
+    ctx.entityCatalog !== undefined ? resolveEntityType(ctx.entityCatalog, previous) : "";
+  const damage = damageForOccupantReveal(entityType, updated.destroyed, 0);
   return {
     sequenceNumber: ctx.runtimeContext.sequenceNumber,
     timestamp: ctx.runtimeContext.timestamp,
@@ -253,6 +281,7 @@ export function resolveTargetDestruction(
       hitOccupant: true,
       targetKind: previous.kind === "fleet" ? "fleet_unit" : "structure",
       occupantDestroyed: updated.destroyed,
+      damage,
     },
   };
 }
@@ -296,15 +325,12 @@ export function buildCombatResult(
     : "none";
 
   if (hitOccupant && hex.occupancy) {
-    let damage: DamageResult | undefined;
     let occupantDestroyed = false;
-    let navalSinkBombBonusParts: number | undefined;
+    let navalSinkBombBonusParts = 0;
     let placementPatch = undefined;
 
     const placementWrap = findPlacement(board, hex.occupancy.placementId);
     const entityType = placementWrap ? resolveEntityType(entityCatalog, placementWrap.placement) : "";
-    const partial = pontosAcertoParcial(entityType);
-    let destructionBonus = 0;
 
     if (!placementWrap) {
       return {
@@ -340,9 +366,6 @@ export function buildCombatResult(
         },
       };
     }
-    if (updated.destroyed) {
-      destructionBonus = pontosDestruicaoAlvo(entityType);
-    }
     if (
       attempt.applyNavalSinkBombBonusRule === true &&
       updated.destroyed &&
@@ -355,7 +378,7 @@ export function buildCombatResult(
       );
     }
 
-    damage = { partialHitValue: partial, destructionBonusValue: destructionBonus };
+    const damage = damageForOccupantReveal(entityType, updated.destroyed, navalSinkBombBonusParts);
 
     return {
       sequenceNumber: seq,
@@ -369,7 +392,6 @@ export function buildCombatResult(
         targetKind,
         occupantDestroyed,
         damage,
-        navalSinkBombBonusParts,
       },
     };
   }
@@ -402,6 +424,7 @@ export function buildCombatResult(
       hitOccupant,
       targetKind,
       occupantDestroyed: false,
+      damage: zeroDamage(),
     },
   };
 }

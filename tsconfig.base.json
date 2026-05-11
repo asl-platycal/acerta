@@ -17,7 +17,9 @@
       "@acerta/services": ["services/index.ts"],
       "@acerta/services/*": ["services/*"],
       "@acerta/backend/*": ["backend/*"],
-      "@acerta/tests/*": ["tests/*"]
+      "@acerta/tests/*": ["tests/*"],
+      "@acerta/types": ["types/index.ts"],
+      "@acerta/types/*": ["types/*"]
     }
   },
   "exclude": ["node_modules"]

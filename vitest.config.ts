@@ -7,6 +7,7 @@ export default defineConfig({
       "@acerta/core": path.resolve(__dirname, "core"),
       "@acerta/shared": path.resolve(__dirname, "shared"),
       "@acerta/services": path.resolve(__dirname, "services"),
+      "@acerta/types": path.resolve(__dirname, "types"),
     },
   },
   test: {
