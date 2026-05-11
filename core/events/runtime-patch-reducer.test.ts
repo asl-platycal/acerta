@@ -2,7 +2,15 @@ import { describe, expect, it } from "vitest";
 import { buildCombatResult, applyRevealToPlacement } from "../engines/combat-engine/combat-engine";
 import { applyPatch, RuntimePatchApplyError } from "./runtime-patch-reducer";
 import { validateRuntimeStatePatch } from "./runtime-patch-validator";
-import type { Board, CombatAttempt, EntityCatalog, Hex, RuntimeActionContext } from "@acerta/shared/schemas";
+import type {
+  Board,
+  CombatAttempt,
+  EntityCatalog,
+  FleetPlacement,
+  Hex,
+  RuntimeActionContext,
+  StructurePlacement,
+} from "@acerta/shared/schemas";
 
 function cell(q: number, r: number, terrain: "water" | "land", occupancy?: NonNullable<Hex["occupancy"]>): Hex {
   const id = `hex:${q}:${r}`;
@@ -134,7 +142,7 @@ describe("runtime-patch-reducer", () => {
     const p2 = buildCombatResult(b1, { target: { hexId: "hex:2:1" }, authorized: true }, catalog, rt(2, 2));
     expect(validateRuntimeStatePatch(b1, p2).ok).toBe(true);
     const b2 = applyPatch(b1, p2);
-    let manual = board.fleetPlacements[0]!;
+    let manual: FleetPlacement | StructurePlacement = board.fleetPlacements[0]!;
     manual = applyRevealToPlacement(manual, "hex:2:0");
     manual = applyRevealToPlacement(manual, "hex:2:1");
     expect(b2.fleetPlacements[0]?.destroyed).toBe(true);
